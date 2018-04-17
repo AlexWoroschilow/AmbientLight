@@ -1,0 +1,12 @@
+[Unit]
+Description=Ambient light service
+After=graphical.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/ambient-light
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
