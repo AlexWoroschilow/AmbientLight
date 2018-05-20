@@ -31,12 +31,12 @@ proc write(source: string, value: string): void =
     stream.close()
   return
 
-proc ambientlight_get(path: string): int =
-  var value: int = 100
-  var maximum: int = 4095
+proc ambientlight_get(path: string): float =
+  var value: float = 100
+  var maximum: float = 4095
   for kind, device in walkDir(path):
-    var current = parseInt(read("$#/in_illuminance_input" % [device]))
-    var percent = toInt(current / maximum * 100)
+    var current = parseFloat(read("$#/in_illuminance_input" % [device]))
+    var percent = current / maximum * 100
     if value > percent:
       value = percent
   return value
@@ -48,18 +48,85 @@ proc backlight_set(path: string, percent: int): void  =
       write("$#/brightness" % [device], intToStr(value))
     return
 
+proc backlight_get(path: string): float =
+  var value: float = 0
+  for kind, device in walkDir(path):
+    var maximum = parseFloat(read("$#/max_brightness" % [device]))
+    var current = parseFloat(read("$#/actual_brightness" % [device]))
+    var percent = current / maximum * 100 # calcuate percentage of the brightness
+    if 100 >= percent and percent > 0:
+      if percent > value: value = percent
+  return value
+
+
 proc main(sensor_path: string, backlight_path: string)  =
+
+  var timeout: int = 1000 # milliseconds
+  var backlight_gobal: int = -1
+
+  # default interval to keep the custom backlight settings
+  # after the time is over, the backlight will be
+  # adjusted to the ambient light automatically
+  const interval_default: int = 300 # seconds
+
+  var interval: int = interval_default
 
   if not dirExists(sensor_path):
     return
 
   while true:
+
+    sleep(timeout)
+
+    var backlight = backlight_get(backlight_path)
     var ambientlight = ambientlight_get(sensor_path)
+    var difference_ba = abs(ambientlight - backlight)
 
-    if ambientlight <  5: ambientlight = 5
-    backlight_set(backlight_path, ambientlight)
+    if backlight_gobal == -1: backlight_gobal = toInt(backlight)
+    var difference_bb = abs(backlight_gobal - toInt(backlight))
 
-    sleep(1500)
+    if difference_bb > 0 and interval >= 0:
+      # if the ambient light has sudenly become to 100%
+      # ignore the time interval and break the loop up
+      if interval > 0 and ambientlight < 100:
+        interval -= 1
+        continue
+      # if the ambient light has sudenly become to 100%
+      # increase the backlight immediately
+      if interval == 0 or ambientlight == 100:
+        interval = interval_default
+
+    if backlight == 0:
+      # ignore everything if the backlight is off
+      # it needs to be possible to turn the screen off
+      continue
+
+    if ambientlight == 100:
+      # set backlight to 100% if there are a full sunlight
+      backlight_gobal =  toInt(ambientlight)
+      backlight_set(backlight_path, backlight_gobal)
+      continue
+
+    if ambientlight == 0 and difference_ba >= 10:
+      backlight_gobal = toInt(backlight - (backlight / 5))
+      # the 5% should be the minimal value
+      # othervice the screen will be turnded off
+      # automatically and this is not what we need
+      if backlight_gobal < 5: backlight_gobal = 5
+      backlight_set(backlight_path, backlight_gobal)
+      continue
+
+    if ambientlight > 0 and difference_ba >= 25:
+      if backlight < ambientlight:
+        backlight_gobal = toInt(ambientlight - ambientlight / 5)
+        backlight_set(backlight_path, backlight_gobal)
+        continue
+
+      backlight_gobal = toInt(backlight - backlight / 3)
+      if backlight_gobal < 5: backlight_gobal = 5
+      backlight_set(backlight_path, backlight_gobal)
+      continue
+
 
 var backlight_path = "/sys/class/backlight"
 var ambientlight_path = "/sys/bus/iio/devices"
